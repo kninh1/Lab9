@@ -1,28 +1,253 @@
 ---
-title: ""
-author: ""
+title: "Lab - Week 10"
+author: "Katrina Ninh"
 format:
   html:
     embed-resources: true
 ---
 
-## Quarto
-
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
 ```{r}
-1 + 1
+
+# Install and load the necessary packages
+
+## Install and load the matrixStats package
+##install.packages("matrixStats")
+library(matrixStats)
+
+library(microbenchmark)
+
+##install.packages("doParallel")
+##install.packages("foreach")
+library(doParallel)
+library(foreach)
+
 ```
 
-You can add options to executable code like this
+
+##  1) This function generates an n x k dataset with all its entries drawn from a Poission distribution with mean lambda.
 
 ```{r}
-#| echo: false
-2 * 2
+
+fun1 <- function(n = 100, k = 4, lambda = 4) {
+  x <- NULL
+  
+  for (i in 1:n){
+    x <- rbind(x, rpois(k, lambda))    
+  }
+  
+  return(x)
+}
+
+fun1alt <- function(n = 100, k = 4, lambda = 4) {
+  # YOUR CODE HERE
+  x <- matrix(rpois(n * k, lambda), nrow = n, ncol = k)
+  return(x)
+}
+
+# --------------------   Benchmarking 1  ------------------------
+
+
+set.seed(123)  # Setting seed for reproducibility
+
+# Original function
+result1 <- fun1(n = 100, k = 4, lambda = 4)
+
+# New efficient function
+result2 <- fun1alt(n = 100, k = 4, lambda = 4)
+
+# Check if the dimensions are the same
+identical(dim(result1), dim(result2))  # Should return TRUE
+
+# Check if the values follow a similar distribution
+summary(result1)
+summary(result2)
+
+
+##The identical function should return TRUE, indicating that the dimensions of the matrices are ##the same. The summary function will show that the values in both matrices follow a Poisson ##distribution with a mean of 4, and they should be similar. This demonstrates that fun1alt ##generates a matrix with the same dimensions and a similar distribution to the original ##function but is more efficient.
+
+
+#----------------------  #Benchmarking 2  ------------------------
+microbenchmark::microbenchmark(
+  fun1(),
+  fun1alt()
+)
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+
+## 2 This function finds the maximum value of each column of a matrix (hint: check out the max.col() function).
+
+
+```{r}
+
+
+## Data Generating Process (10 x 10,000 matrix)
+set.seed(1234)
+x <- matrix(rnorm(1e4), nrow=10)
+
+## Find each column's max value
+fun2 <- function(x) {
+  apply(x, 2, max)
+}
+
+##Here's the improved version of the fun2alt function:
+fun2alt <- function(x) {
+  # YOUR CODE HERE
+  result <- colMaxs(x)
+  return(result)
+}
+
+
+##Now, let's demonstrate that both functions return the same output for a given input matrix x, ##and then compare the speed of the two functions:
+
+# Data Generating Process (10 x 10,000 matrix)
+set.seed(1234)
+x <- matrix(rnorm(1e4), nrow = 10)
+
+# Original function
+result1 <- fun2(x)
+
+# New efficient function
+result2 <- fun2alt(x)
+
+# Check if both functions return the same output
+identical(result1, result2)  # Should return TRUE
+
+# Check the speed of both functions
+
+microbenchmark(
+  fun2(x),
+  fun2alt(x),
+  times = 100
+)
+
+
+
+```
+
+
+##The identical function should return TRUE, indicating that both functions return the same ##output for the given input matrix x. The microbenchmark function will measure the execution ##time of both functions and give you a performance comparison.
+##
+##The fun2alt function should be significantly faster, especially for large matrices, as it ##leverages optimized functions from the matrixStats package.
+
+##-------------------------------------------------------------------------------------------
+
+
+##Problem 3.1 : Parallelization - boostrapping
+
+```{r}
+
+##To parallelize the lapply loop in the my_boot function, you can use the parallel package in ##R. Here's an updated version of the function that parallelizes the bootstrapping process ##using the foreach and doParallel packages, allowing you to specify the number of cores using ##the ncpus argument:
+
+
+my_boot <- function(dat, stat, R, ncpus = 1L) {
+  # Getting the random indices
+  n <- nrow(dat)
+  idx <- matrix(sample.int(n, n * R, TRUE), nrow = n, ncol = R)
+
+  # Initialize a parallel backend with the specified number of cores
+  cl <- makeCluster(ncpus)
+  registerDoParallel(cl)
+
+  # Use foreach to parallelize the loop
+  ans <- foreach(i = 1:R, .combine = rbind) %dopar% {
+    stat(dat[idx[, i], , drop = FALSE])
+  }
+
+  # Stop the parallel backend
+  stopCluster(cl)
+
+  return(ans)
+}
+
+
+
+
+```
+
+##With this updated function, you can specify the number of cores to use for parallel ##processing via the ncpus argument. It parallelizes the bootstrap process, making it more ##efficient when running on a multi-core system.
+
+
+##-------------------------------------------------------------------------------------------
+
+
+##Problem 3.2 - Once you have a version of the my_boot() function that runs on multiple cores, ##check that it provides accurate results by comparing it to a parametric model:
+
+
+
+```{r}
+
+
+# Bootstrap of an OLS
+my_stat <- function(d) coef(lm(y ~ x, data=d))
+
+# DATA SIM
+set.seed(1)
+n <- 500; R <- 1e4
+
+x <- cbind(rnorm(n)); y <- x*5 + rnorm(n)
+
+# Checking if we get something similar as lm
+ans0 <- confint(lm(y~x))
+ans1 <- my_boot(dat = data.frame(x, y), my_stat, R = R, ncpus = 2L)
+
+# You should get something like this
+##t(apply(ans1, 2, quantile, c(.025,.975)))
+
+
+##To check if the my_boot function provides accurate results, you can compare its output to ##the results obtained from the parametric model (linear regression) using the confint function. 
+
+# Calculate quantiles from the bootstrap results
+quantiles <- t(apply(ans1, 2, quantile, c(0.025, 0.975)))
+
+
+##                   2.5%      97.5%
+## (Intercept) -0.1372435 0.05074397
+## x            4.8680977 5.04539763
+ans0
+##                  2.5 %     97.5 %
+## (Intercept) -0.1379033 0.04797344
+## x            4.8650100 5.04883353
+
+
+# Compare with the parametric model results
+quantiles
+
+
+```
+
+
+
+##-------------------------------------------------------------------------------------------
+
+##Problem 3.3
+
+
+```{r}
+
+# Bootstrap of an OLS
+my_stat <- function(d) coef(lm(y ~ x, data = d))
+
+# DATA SIM
+set.seed(1)
+n <- 500
+R <- 4000  # Reduced R for quicker testing
+
+x <- cbind(rnorm(n))
+y <- x * 5 + rnorm(n)
+
+# Measure execution time for ncpus = 1L (single-core)
+time_single_core <- system.time(my_boot(dat = data.frame(x, y), my_stat, R = R, ncpus = 1L))
+
+# Measure execution time for ncpus = 2L (dual-core)
+time_dual_core <- system.time(my_boot(dat = data.frame(x, y), my_stat, R = R, ncpus = 2L))
+
+time_single_core
+time_dual_core
+
+```
+
+##The output will show you the user, system, and elapsed times for both the single-core and ##dual-core runs. By comparing these times, you can determine if the parallelized version of ##my_boot is indeed faster when utilizing multiple cores.
+
+
+
